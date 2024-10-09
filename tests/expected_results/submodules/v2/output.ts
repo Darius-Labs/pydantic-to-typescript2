@@ -5,9 +5,6 @@
 /* Do not modify it by hand - just update the pydantic models and then re-run the script
 */
 
-export type CatBreed = "domestic shorthair" | "bengal" | "persian" | "siamese";
-export type DogBreed = "mutt" | "labrador" | "golden retriever";
-
 export interface AnimalShelter {
   address: string;
   cats: Cat[];
@@ -23,4 +20,16 @@ export interface Dog {
   name: string;
   age: number;
   breed: DogBreed;
+}
+
+export const enum CatBreed {
+  domestic_shorthair = "domestic shorthair",
+  bengal = "bengal",
+  persian = "persian",
+  siamese = "siamese"
+}
+export const enum DogBreed {
+  mutt = "mutt",
+  labrador = "labrador",
+  golden_retriever = "golden retriever"
 }
