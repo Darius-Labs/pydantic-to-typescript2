@@ -166,8 +166,7 @@ def extract_enum_models(models: List[Type[BaseModel]]) -> List[Type[Enum]]:
 
     return enums
 
-
-def clean_output_file(output_filename: str) -> None:
+def clean_output_file(output_filename: str, extra_comment: str = "") -> None:
     """
     Clean up the output file typescript definitions were written to by:
     1. Removing the 'master model'.
@@ -193,8 +192,12 @@ def clean_output_file(output_filename: str) -> None:
         "/**\n",
         "/* This file was automatically generated from pydantic models by running pydantic2ts.\n",
         "/* Do not modify it by hand - just update the pydantic models and then re-run the script\n",
-        "*/\n\n",
     ]
+
+    if extra_comment:
+        banner_comment_lines.append(f"/* {extra_comment}\n")
+
+    banner_comment_lines.append("*/\n\n")
 
     new_lines = banner_comment_lines + lines[:start] + lines[(end + 1) :]
 
@@ -326,7 +329,7 @@ def generate_json_schema_v2(models: List[Type[BaseModel]]) -> str:
 
 
 def generate_typescript_defs(
-    module: str, output: str, exclude: Tuple[str] = (), json2ts_cmd: str = "json2ts"
+    module: str, output: str, exclude: Tuple[str] = (), json2ts_cmd: str = "json2ts", extra_comment: str = ""
 ) -> None:
     """
     Convert the pydantic models in a python module into typescript interfaces.
@@ -336,6 +339,8 @@ def generate_typescript_defs(
     :param exclude: optional, a tuple of names for pydantic models which should be omitted from the typescript output.
     :param json2ts_cmd: optional, the command that will execute json2ts. Provide this if the executable is not
                         discoverable or if it's locally installed (ex: 'yarn json2ts').
+    :param extra_comment: optional, a string which should be added to the top of the generated typescript
+                           definitions.
     """
     if " " not in json2ts_cmd and not shutil.which(json2ts_cmd):
         raise Exception(
@@ -381,7 +386,7 @@ def generate_typescript_defs(
     shutil.rmtree(schema_dir)
 
     if json2ts_exit_code == 0:
-        clean_output_file(output)
+        clean_output_file(output, extra_comment)
         logger.info(f"Saved typescript definitions to {output}.")
     else:
         raise RuntimeError(
@@ -422,6 +427,11 @@ def parse_cli_args(args: List[str] = None) -> argparse.Namespace:
         "Provide this if it's not discoverable or if it's only installed locally (example: 'yarn json2ts').\n"
         "(default: json2ts)",
     )
+    parser.add_argument(
+        "--extra-comment",
+        default="",
+        help="Additional comment to be added to the output, as a string."
+    )
     return parser.parse_args(args)
 
 
@@ -436,6 +446,7 @@ def main() -> None:
         args.output,
         tuple(args.exclude),
         args.json2ts_cmd,
+        args.extra_comment,
     )
 
 
