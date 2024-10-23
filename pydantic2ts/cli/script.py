@@ -479,7 +479,7 @@ def main() -> None:
     logging.basicConfig(
         level=logging.INFO,  # Set default level to INFO
         format="%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
     args = parse_cli_args()
 
