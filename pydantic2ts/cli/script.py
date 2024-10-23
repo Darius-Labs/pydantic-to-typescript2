@@ -11,17 +11,35 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from tempfile import mkdtemp
 from types import ModuleType
-from typing import Any, Dict, List, Tuple, Type, get_origin, get_args, Set, cast
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    get_origin,
+    get_args,
+    Set,
+    cast,
+)
 from uuid import uuid4
-
-from pydantic import VERSION, BaseModel, create_model
+import subprocess
+from packaging import version
+import pydantic
+from contextlib import contextmanager
 
 try:
-    from types import UnionType
+    from pydantic.generics import GenericModel, BaseModel, create_model
 except ImportError:
-    UnionType = None
+    # Handle the case where GenericModel isn't available (e.g., different Pydantic version)
+    GenericModel = None
 
-V2 = True if VERSION.startswith("2") else False
+GenericModel: Optional[Type[BaseModel]] = None
+
+
+pydantic_version = version.parse(pydantic.VERSION)
+V2 = pydantic_version.major == 2
 
 if not V2:
     try:
@@ -75,20 +93,21 @@ def is_submodule(obj, module_name: str) -> bool:
     )
 
 
-def is_concrete_pydantic_model(obj: type) -> bool:
+def is_concrete_pydantic_model(obj: Type) -> bool:
     """
-    Return true if an object is a concrete subclass of pydantic's BaseModel.
-    'concrete' meaning that it's not a GenericModel.
+    Return True if an object is a concrete subclass of Pydantic's BaseModel.
+    'Concrete' meaning that it's not a GenericModel.
     """
     generic_metadata = getattr(obj, "__pydantic_generic_metadata__", None)
+
     if not inspect.isclass(obj):
         return False
     elif obj is BaseModel:
         return False
     elif not V2 and GenericModel and issubclass(obj, GenericModel):
-        return bool(obj.__concrete__)
+        return bool(getattr(obj, "__concrete__", False))
     elif V2 and generic_metadata:
-        return not bool(generic_metadata["parameters"])
+        return not bool(generic_metadata.get("parameters"))
     else:
         return issubclass(obj, BaseModel)
 
@@ -132,7 +151,7 @@ def extract_pydantic_models_from_model(
 
     all_models.append(model)
 
-    for field, field_type in get_model_fields(model).items():
+    for field_type in get_model_fields(model).values():
         flattened_types = flatten_types(field_type.annotation)
         for inner_type in flattened_types:
             if is_concrete_pydantic_model(inner_type):
@@ -166,6 +185,7 @@ def extract_enum_models(models: List[Type[BaseModel]]) -> List[Type[Enum]]:
 
     return enums
 
+
 def clean_output_file(output_filename: str, extra_comment: str = "") -> None:
     """
     Clean up the output file typescript definitions were written to by:
@@ -175,7 +195,7 @@ def clean_output_file(output_filename: str, extra_comment: str = "") -> None:
        this function removes it from the generated typescript file.
     2. Adding a banner comment with clear instructions for how to regenerate the typescript definitions.
     """
-    with open(output_filename, "r") as f:
+    with open(output_filename, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
     start, end = None, None
@@ -201,7 +221,7 @@ def clean_output_file(output_filename: str, extra_comment: str = "") -> None:
 
     new_lines = banner_comment_lines + lines[:start] + lines[(end + 1) :]
 
-    with open(output_filename, "w") as f:
+    with open(output_filename, "w", encoding="utf-8") as f:
         f.writelines(new_lines)
 
 
@@ -225,10 +245,10 @@ def clean_schema(schema: Dict[str, Any]) -> None:
 def add_enum_names_v1(model: Type[Enum]) -> None:
     @classmethod
     def __modify_schema__(cls, field_schema: Dict[str, Any]):
-        if len(model.__members__.keys()) == len(field_schema["enum"]):
+        if len(model.__members__) == len(field_schema["enum"]):
             field_schema.update(tsEnumNames=list(model.__members__.keys()))
             for name, value in zip(field_schema["tsEnumNames"], field_schema["enum"]):
-                assert cls[name].value == value
+                assert getattr(cls, name).value == value
 
     setattr(model, "__modify_schema__", __modify_schema__)
 
@@ -328,22 +348,36 @@ def generate_json_schema_v2(models: List[Type[BaseModel]]) -> str:
                 m.model_config["extra"] = x
 
 
+@contextmanager
+def temporary_directory():
+    """Create a temporary directory and ensure its cleanup after use."""
+    dir_path = mkdtemp()
+    try:
+        yield dir_path
+    finally:
+        shutil.rmtree(dir_path)
+
+
 def generate_typescript_defs(
-    module: str, output: str, exclude: Tuple[str] = (), json2ts_cmd: str = "json2ts", extra_comment: str = ""
+    module: str,
+    output: str,
+    exclude: Tuple[str] = (),
+    json2ts_cmd: str = "json2ts",
+    extra_comment: str = "",
 ) -> None:
     """
-    Convert the pydantic models in a python module into typescript interfaces.
+        Convert the pydantic models in a python module into typescript interfaces.
 
-    :param module: python module containing pydantic model definitions, ex: my_project.api.schemas
-    :param output: file that the typescript definitions will be written to
-    :param exclude: optional, a tuple of names for pydantic models which should be omitted from the typescript output.
-    :param json2ts_cmd: optional, the command that will execute json2ts. Provide this if the executable is not
-                        discoverable or if it's locally installed (ex: 'yarn json2ts').
-    :param extra_comment: optional, a string which should be added to the top of the generated typescript
-                           definitions.
+        :param module: python module containing pydantic model definitions, ex: my_project.api.schemas
+        :param output: file that the typescript definitions will be written to
+        :param exclude: optional, a tuple of names for pydantic models which should be omitted from the typescript output.
+        :param json2ts_cmd: optional, the command that will execute json2ts. Provide this if the executable is not
+    discoverable or if it's locally installed (ex: 'yarn json2ts').
+        :param extra_comment: optional, a string which should be added to the top of the generated typescript
+                               definitions.
     """
     if " " not in json2ts_cmd and not shutil.which(json2ts_cmd):
-        raise Exception(
+        raise RuntimeError(
             "json2ts must be installed. Instructions can be found here: "
             "https://www.npmjs.com/package/json-schema-to-typescript"
         )
@@ -366,7 +400,7 @@ def generate_typescript_defs(
     schema_dir = mkdtemp()
     schema_file_path = os.path.join(schema_dir, "schema.json")
 
-    with open(schema_file_path, "w") as f:
+    with open(schema_file_path, "w", encoding="utf-8") as f:
         f.write(schema)
 
     DEBUG = os.environ.get("DEBUG", False)
@@ -374,24 +408,27 @@ def generate_typescript_defs(
     if DEBUG:
         debug_schema_file_path = Path(module).parent / "schema_debug.json"
         # raise ValueError(module)
-        with open(debug_schema_file_path, "w") as f:
+        with open(debug_schema_file_path, "w", encoding="utf-8") as f:
             f.write(schema)
 
     logger.info("Converting JSON schema to typescript definitions...")
 
-    json2ts_exit_code = os.system(
-        f'{json2ts_cmd} -i {schema_file_path} -o {output} --bannerComment ""'
-    )
+    try:
+        subprocess.run(
+            [json2ts_cmd, "-i", schema_file_path, "-o", output, "--bannerComment", ""],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as e:
+        logger.error('"%s" failed with exit code %d.', json2ts_cmd, e.returncode)
+        logger.error("stderr: %s", e.stderr)
+        raise RuntimeError(f'"{json2ts_cmd}" failed.') from e
 
     shutil.rmtree(schema_dir)
 
-    if json2ts_exit_code == 0:
-        clean_output_file(output, extra_comment)
-        logger.info(f"Saved typescript definitions to {output}.")
-    else:
-        raise RuntimeError(
-            f'"{json2ts_cmd}" failed with exit code {json2ts_exit_code}.'
-        )
+    clean_output_file(output, extra_comment)
+    logger.info("Saved typescript definitions to %s.", output)
 
 
 def parse_cli_args(args: List[str] = None) -> argparse.Namespace:
@@ -430,7 +467,7 @@ def parse_cli_args(args: List[str] = None) -> argparse.Namespace:
     parser.add_argument(
         "--extra-comment",
         default="",
-        help="Additional comment to be added to the output, as a string."
+        help="Additional comment to be added to the output, as a string.",
     )
     return parser.parse_args(args)
 
@@ -439,8 +476,19 @@ def main() -> None:
     """
     CLI entrypoint to run :func:`generate_typescript_defs`
     """
-    logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(message)s")
+    logging.basicConfig(
+        level=logging.INFO,  # Set default level to INFO
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
     args = parse_cli_args()
+
+    if not args.module:
+        logger.error("--module argument is required.")
+        sys.exit(1)
+    if not args.output:
+        logger.error("--output argument is required.")
+        sys.exit(1)
     return generate_typescript_defs(
         args.module,
         args.output,
