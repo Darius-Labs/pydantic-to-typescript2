@@ -6,9 +6,11 @@ from pathlib import Path
 import pytest
 
 from pydantic2ts import generate_typescript_defs
-from pydantic2ts.cli.script import DEBUG, V2, parse_cli_args
+from pydantic2ts.cli.script import V2, parse_cli_args
 
 version = "v2" if V2 else "v1"
+
+DEBUG = os.environ.get("DEBUG", False)
 
 
 def _results_directory() -> str:
@@ -29,7 +31,7 @@ def run_test(
     tmpdir, test_name, *, module_path=None, call_from_python=False, exclude=()
 ):
     """
-    Execute pydantic2ts logic for converting pydantic models into tyepscript definitions.
+    Execute pydantic2ts logic for converting pydantic models into typescript definitions.
     Compare the output with the expected output, verifying it is identical.
     """
     module_path = module_path or get_input_module(test_name)
@@ -90,6 +92,10 @@ def test_computed_fields(tmpdir):
 
 def test_extra_fields(tmpdir):
     run_test(tmpdir, "extra_fields")
+
+
+def test_enums(tmpdir):
+    run_test(tmpdir, "enums")
 
 
 def test_relative_filepath(tmpdir):
