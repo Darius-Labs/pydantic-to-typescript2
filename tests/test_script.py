@@ -28,7 +28,13 @@ def get_expected_output(test_name: str) -> str:
 
 
 def run_test(
-    tmpdir, test_name, *, module_path=None, call_from_python=False, exclude=(), extra_comment=None
+    tmpdir,
+    test_name,
+    *,
+    module_path=None,
+    call_from_python=False,
+    exclude=(),
+    extra_comment=None,
 ):
     """
     Execute pydantic2ts logic for converting pydantic models into typescript definitions.
@@ -38,7 +44,9 @@ def run_test(
     output_path = tmpdir.join(f"cli_{test_name}.ts").strpath
 
     if call_from_python:
-        generate_typescript_defs(module_path, output_path, exclude, extra_comment=extra_comment)
+        generate_typescript_defs(
+            module_path, output_path, exclude, extra_comment=extra_comment
+        )
     else:
         cmd = f"pydantic2ts --module {module_path} --output {output_path}"
         for model_to_exclude in exclude:
@@ -197,6 +205,11 @@ def test_cli_args_with_extra_comment(tmpdir):
     )
     assert args_with_comment.extra_comment == "This is a special module"
 
-def test_validate_extra_comments(tmpdir):
-    run_test(tmpdir, "extra_comment", call_from_python=True, extra_comment="This is a special comment")
 
+def test_validate_extra_comments(tmpdir):
+    run_test(
+        tmpdir,
+        "extra_comment",
+        call_from_python=True,
+        extra_comment="This is a special comment",
+    )
