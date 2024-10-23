@@ -28,7 +28,7 @@ def get_expected_output(test_name: str) -> str:
 
 
 def run_test(
-    tmpdir, test_name, *, module_path=None, call_from_python=False, exclude=()
+    tmpdir, test_name, *, module_path=None, call_from_python=False, exclude=(), extra_comment=None
 ):
     """
     Execute pydantic2ts logic for converting pydantic models into typescript definitions.
@@ -38,7 +38,7 @@ def run_test(
     output_path = tmpdir.join(f"cli_{test_name}.ts").strpath
 
     if call_from_python:
-        generate_typescript_defs(module_path, output_path, exclude)
+        generate_typescript_defs(module_path, output_path, exclude, extra_comment=extra_comment)
     else:
         cmd = f"pydantic2ts --module {module_path} --output {output_path}"
         for model_to_exclude in exclude:
@@ -51,7 +51,6 @@ def run_test(
     if DEBUG:
         out_dir = Path(module_path).parent
         output_path = out_dir / "output_debug.ts"
-
     assert output == get_expected_output(test_name)
 
 
@@ -169,6 +168,7 @@ def test_parse_cli_args():
     assert args_basic.output == "myOutput.ts"
     assert args_basic.exclude == []
     assert args_basic.json2ts_cmd == "json2ts"
+    assert args_basic.extra_comment == ""
     args_with_excludes = parse_cli_args(
         [
             "--module",
@@ -182,3 +182,21 @@ def test_parse_cli_args():
         ]
     )
     assert args_with_excludes.exclude == ["Foo", "Bar"]
+
+
+def test_cli_args_with_extra_comment(tmpdir):
+    args_with_comment = parse_cli_args(
+        [
+            "--module",
+            "my_module.py",
+            "--output",
+            "myOutput.ts",
+            "--extra-comment",
+            "This is a special module",
+        ]
+    )
+    assert args_with_comment.extra_comment == "This is a special module"
+
+def test_validate_extra_comments(tmpdir):
+    run_test(tmpdir, "extra_comment", call_from_python=True, extra_comment="This is a special comment")
+
