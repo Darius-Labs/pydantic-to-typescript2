@@ -4,6 +4,7 @@ import inspect
 import json
 import logging
 import os
+import shlex
 import shutil
 import sys
 from enum import Enum
@@ -25,6 +26,7 @@ from typing import (
 )
 from uuid import uuid4
 import subprocess
+from pydantic import BaseModel, create_model
 from packaging import version
 import pydantic
 from contextlib import contextmanager
@@ -241,6 +243,9 @@ def clean_schema(schema: Dict[str, Any]) -> None:
     if "enum" in schema and schema.get("description") == "An enumeration.":
         del schema["description"]
 
+    # Ensure additionalProperties is set to false
+    schema["additionalProperties"] = False
+
 
 def add_enum_names_v1(model: Type[Enum]) -> None:
     @classmethod
@@ -357,7 +362,6 @@ def temporary_directory():
     finally:
         shutil.rmtree(dir_path)
 
-
 def generate_typescript_defs(
     module: str,
     output: str,
@@ -407,19 +411,45 @@ def generate_typescript_defs(
 
     if DEBUG:
         debug_schema_file_path = Path(module).parent / "schema_debug.json"
-        # raise ValueError(module)
         with open(debug_schema_file_path, "w", encoding="utf-8") as f:
             f.write(schema)
 
     logger.info("Converting JSON schema to typescript definitions...")
 
     try:
-        subprocess.run(
-            [json2ts_cmd, "-i", schema_file_path, "-o", output, "--bannerComment", ""],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        if " " in json2ts_cmd:
+            # Command contains spaces; execute through the shell
+            cmd = f"{json2ts_cmd} -i {shlex.quote(schema_file_path)} -o {shlex.quote(output)} --bannerComment ''"
+            subprocess.run(
+                cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+                shell=True,
+            )
+        else:
+            # Single command; execute directly
+            cmd = [
+                json2ts_cmd,
+                "-i",
+                schema_file_path,
+                "-o",
+                output,
+                "--bannerComment",
+                "",
+            ]
+            subprocess.run(
+                cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+                shell=False,
+            )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "json2ts must be installed. Instructions can be found here: "
+            "https://www.npmjs.com/package/json-schema-to-typescript"
+        ) from exc
     except subprocess.CalledProcessError as e:
         logger.error('"%s" failed with exit code %d.', json2ts_cmd, e.returncode)
         logger.error("stderr: %s", e.stderr)
